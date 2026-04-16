@@ -1,0 +1,13 @@
+total_rows,valid_dni,missing_or_invalid_dni,duplicated_rows_by_dni,duplicated_unique_dni,modality,file,id_column_used
+361,361,0,0,0,CT,Turno-1170.xls,Documento
+403,403,0,0,0,CT,Turno-220.xls,Documento
+556,556,0,2,1,CT,Turno-2688.xls,Documento
+598,598,0,4,2,CT,Turno-4001.xls,Documento
+694,694,0,2,1,CT,Turno-5965.xls,Documento
+2612,2612,0,64,31,CT,__TOTAL_MODALITY__,Documento
+1328,1328,0,2,1,Camara_Gamma,Turno-1773.xls,Documento
+1551,1551,0,0,0,Camara_Gamma,Turno-3248.xls,Documento
+1355,1355,0,4,2,Camara_Gamma,Turno-3456.xls,Documento
+1286,1286,0,6,3,Camara_Gamma,Turno-3935.xls,Documento
+1321,1321,0,0,0,Camara_Gamma,Turno-8569.xls,Documento
+6841,6841,0,353,175,Camara_Gamma,__TOTAL_MODALITY__,Documento

@@ -1,0 +1,40 @@
+\section{Cruce de datos entre CT cardíaco y Cámara Gamma mediante DNI}
+En esta sección se describe el procedimiento implementado para integrar bases tabulares provenientes de tomografía computada (CT) cardíaca y de cámara gamma, con el objetivo de identificar pacientes que poseen registros en ambas modalidades. El cruce se realiza de manera reproducible en un entorno Python (pandas), y se construye a partir de una clave de identificación basada en el documento nacional o identificador numérico del paciente, normalizado previamente para reducir heterogeneidades de formato.
+
+El punto de partida son las colecciones de archivos fuente ubicadas en `Database/CT/` y en `Database/Camara_Gamma/`. Dado que cada modalidad se encuentra fragmentada en múltiples archivos (cada uno asociado a un turno o documento administrativo), el pipeline primero concatena todos los registros compatibles de una misma modalidad para obtener dos cohortes unificadas. Esta etapa se implementa en `scripts/run_patient_matching.py` utilizando `load_many` desde `src/ffr_gamma_pipeline/io_utils.py`, que además agrega trazabilidad a nivel de archivo mediante metadatos de origen. Una vez unificadas las tablas, la estrategia de cruce se centra en la identificación del paciente mediante un campo documental.
+
+La elección del DNI como identificador principal se sustenta en la variabilidad inherente de los nombres y apellidos, que pueden presentar diferencias ortográficas, cambios de formato (orden apellido/nombre), tildes, o posibles inconsistencias de carga manual. En contraste, el documento numérico se utiliza como clave para determinar correspondencias entre modalidades. En el código, la columna exacta que contiene el documento se detecta automáticamente mediante `choose_id_column`, que compara las columnas presentes con un conjunto de candidatas definidas en `src/ffr_gamma_pipeline/config.py` (`PATIENT_ID_CANDIDATES`). La normalización del valor se implementa con `normalize_dni`, que convierte el contenido a cadena, elimina espacios, remueve separadores comunes (puntos y guiones) y conserva únicamente dígitos; si no es posible extraer dígitos útiles, el valor se transforma en `None` y la fila se descarta.
+
+Formalmente, la normalización se expresa en la función `normalize_dni` de `src/ffr_gamma_pipeline/cleaning.py`. El siguiente fragmento resume la lógica aplicada:
+\begin{verbatim}
+raw = str(value)
+raw = raw.strip().replace(" ", "")
+raw = raw.replace(".", "").replace("-", "")
+digits = re.sub(r"\D+", "", raw)
+if not digits:
+    return None
+return digits
+\end{verbatim}
+Una vez normalizado el identificador, el pipeline construye la columna `patient_id` y elimina de cada modalidad las filas cuyo documento no resulta válido. En el código, esto se realiza en `clean_patient_id`, donde `patient_id` se crea aplicando `normalize_dni` sobre la columna documental seleccionada y luego se filtran las filas con `patient_id` nulo.
+
+El método de cruce entre CT y Cámara Gamma utiliza exclusivamente el identificador `patient_id`. En primer lugar, se evita el sobreconteo reduciendo cada cohorte a una única fila por paciente mediante `unique_patients`, que ordena por `patient_id` y elimina duplicados en `patient_id`. Esta deduplicación garantiza que un mismo paciente con múltiples turnos no se cuente más de una vez durante la intersección. Luego, el conjunto de pacientes coincidentes se obtiene mediante un `inner merge` (intersección) sobre `patient_id`. En `src/ffr_gamma_pipeline/matching.py`, la operación de cruce se implementa como la fusión `how="inner"`, que preserva únicamente aquellos identificadores presentes en ambas modalidades.
+\begin{verbatim}
+ct_unique = unique_patients(ct_df)[["patient_id"]].assign(has_ct=True)
+gamma_unique = unique_patients(gamma_df)[["patient_id"]].assign(has_gamma=True)
+return ct_unique.merge(gamma_unique, on="patient_id", how="inner")
+\end{verbatim}
+La implicancia metodológica de utilizar un `inner join` es que el dataset final representa pacientes para los cuales existe evidencia en CT y en Cámara Gamma dentro de las bases disponibles. Bajo este criterio, los registros incompletos (pacientes presentes en una sola modalidad) no forman parte del conjunto de coincidencias, de acuerdo con el objetivo del estudio: evaluar integración entre modalidades para los mismos pacientes.
+
+Además del dataset de coincidencias, el pipeline construye una tabla enriquecida a nivel de paciente en `scripts/run_patient_matching.py` mediante `build_matched_table`. En esta etapa, se generan vistas por modalidad que contienen `patient_id` y campos descriptivos (nombre y apellido). Al mismo tiempo, se incorporan columnas temporales reales del estudio: la columna de fecha se detecta automáticamente entre candidatas (por ejemplo `Fecha Turno`, `Inicio Estudio`, `Fin Estudio`, o `Fecha Turno Dado`) y luego se parsea como fecha con `pd.to_datetime(..., errors="coerce")`. La columna temporal final del dataset se define con una estrategia explícita y consistente: se prioriza la fecha proveniente de Cámara Gamma, y se utiliza la fecha de CT como fallback cuando la fecha de Cámara Gamma resulta inválida o no interpretable (`NaT`). Finalmente, el conjunto se ordena cronológicamente por `fecha` en orden ascendente, preservando de manera consistente la secuencia temporal definida por el campo de estudio seleccionado.
+
+Este comportamiento se implementa explícitamente en `build_matched_table` de la siguiente manera:
+\begin{verbatim}
+gamma_parsed = pd.to_datetime(matched[gamma_fecha_col], errors="coerce")
+ct_parsed = pd.to_datetime(matched[ct_fecha_col], errors="coerce")
+matched["fecha"] = gamma_parsed.where(gamma_parsed.notna(), ct_parsed)
+matched = matched.sort_values(by="fecha", ascending=True, na_position="last").reset_index(drop=True)
+\end{verbatim}
+
+Como resultado, el repositorio exporta archivos que reflejan la intersección de cohortes y la información asociada al paciente. En particular, se generan los artefactos `outputs/pacientes_con_ambos_estudios.csv`, que resume la pertenencia a ambas modalidades; `outputs/pacientes_coincidentes_ct_gamma.csv`, que integra campos de CT y Cámara Gamma asociados a cada `patient_id` y contiene la columna temporal `fecha`; y `outputs/pacientes_coincidentes_resumen.xlsx`, que sintetiza el dataset en el formato solicitado para análisis posteriores, incluyendo `patient_id`, `fecha`, `dni`, `nombre` y `apellido`.
+
+Desde el punto de vista de consideraciones y limitaciones, el procedimiento depende críticamente de la calidad del campo documental. Si el documento está ausente, contiene texto no interpretable o no permite extraer dígitos mediante la normalización, la fila queda descartada y no participa del cruce. Este comportamiento reduce falsos positivos, pero puede introducir sesgos por exclusión sistemática de registros con documentos defectuosos. Asimismo, aunque el matching se realiza sin usar nombres, los nombres y apellidos se conservan como información descriptiva y se normalizan internamente al formar las tablas finales; por lo tanto, su calidad no afecta el criterio de intersección automática, pero sí la interpretación cualitativa posterior. Finalmente, la existencia de múltiples turnos por paciente se maneja mediante deduplicación previa a la intersección, lo cual implica que el dataset final representa una consolidación por paciente y no el detalle completo de todos los eventos individuales.
