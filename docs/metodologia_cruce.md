@@ -28,7 +28,7 @@ Identificar pacientes con presencia de ambos estudios (CT y Camara Gamma) usando
 - Reporta conteos antes y despues de limpieza.
 - Exporta resultados intermedios y finales en `outputs/`.
 
-## Texto sugerido para la monografia
+## resumen para monografia
 
 "La integración entre bases de CT cardíaco y Cámara Gamma se implementó mediante un pipeline reproducible en Python (pandas), estructurado en etapas de carga, limpieza, cruce y exportación. Dado el riesgo de inconsistencia en nombres y apellidos, se adoptó como clave principal el identificador documental del paciente. El campo fue normalizado a un formato numérico homogéneo (solo dígitos), y se excluyeron registros sin identificador válido. Posteriormente, se realizó una intersección por identificador entre ambas cohortes, previamente unificadas por modalidad. Este procedimiento permitió determinar de manera trazable la cantidad de pacientes con ambos estudios, minimizando sesgos por errores de digitación nominal." 
 
